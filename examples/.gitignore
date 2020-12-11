@@ -1,0 +1,3 @@
+*.o
+chatserver/chatserver
+chatserver/chatserver_mt

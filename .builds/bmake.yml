@@ -1,0 +1,12 @@
+image: alpine/3.12
+packages:
+  - bmake
+  - sudo
+sources:
+  - 'https://github.com/concatime/dasynq-fork.git'
+tasks:
+  - build: |
+      cd libdasynq-fork
+
+      bmake -e -f build.make
+      sudo bmake -e -f build.make install

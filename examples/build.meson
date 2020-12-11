@@ -1,0 +1,8 @@
+executable('chatserver', 'chatserver/chatserver.cpp',
+  dependencies: [dasynq_dep],
+)
+
+thread_dep = dependency('threads')
+executable('chatserver_mt', 'chatserver/chatserver_mt.cpp',
+  dependencies: [dasynq_dep, thread_dep],
+)

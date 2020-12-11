@@ -1,0 +1,86 @@
+#ifndef DASYNQ_INTERRUPT_HPP_
+#define DASYNQ_INTERRUPT_HPP_
+
+#include <fcntl.h>
+#include <unistd.h>
+
+#include "config.h"
+#include "mutex.hpp"
+#include "util.hpp"
+
+/*
+ * Mechanism for interrupting an event loop wait.
+ */
+
+namespace dasynq {
+
+template <typename Base, typename Mutex = typename Base::mutex_t>
+class interrupt_channel;
+
+// In the non-multi-thread case, this doesn't need to be supported:
+template <typename Base>
+class interrupt_channel<Base, null_mutex> : public Base {
+public:
+	void interrupt_wait() {}
+};
+
+template <typename Base, typename Mutex> class interrupt_channel : public Base {
+	static inline int create_pipe(int filedes[2]) {
+		return pipe2(filedes, O_CLOEXEC | O_NONBLOCK);
+	}
+
+	int pipe_r_fd;
+	int pipe_w_fd;
+
+public:
+	template <typename T> void init(T *loop_mech) {
+		int pipedes[2];
+		if (create_pipe(pipedes) == -1) {
+			throw std::system_error(errno, std::system_category());
+		}
+
+		pipe_r_fd = pipedes[0];
+		pipe_w_fd = pipedes[1];
+
+		try {
+			loop_mech->add_fd_watch(pipe_r_fd, &pipe_r_fd, IN_EVENTS);
+		} catch (...) {
+			close(pipe_r_fd);
+			close(pipe_w_fd);
+			throw;
+		}
+
+		Base::init(loop_mech);
+	}
+
+	template <typename T>
+	std::tuple<int, typename Base::traits_t::fd_s>
+	receive_fd_event(T &loop_mech, typename Base::traits_t::fd_r fd_r_a,
+	                 void *userdata, int flags) {
+		if (userdata == &pipe_r_fd) {
+			// try to clear the pipe
+			char buf[64];
+			read(pipe_r_fd, buf, 64);
+			if (Base::traits_t::supports_non_oneshot_fd) {
+				// If the loop mechanism actually persists none-oneshot marked
+				// watches, we don't need to re-enable:
+				return std::make_tuple(
+				    0, typename Base::traits_t::fd_s(pipe_r_fd));
+			} else {
+				return std::make_tuple(
+				    IN_EVENTS, typename Base::traits_t::fd_s(pipe_r_fd));
+			}
+		} else {
+			return Base::receive_fd_event(loop_mech, fd_r_a, userdata, flags);
+		}
+	}
+
+	void interrupt_wait() {
+		char buf[1] = {0};
+		write(pipe_w_fd, buf, 1);
+	}
+};
+
+} // namespace dasynq
+
+#endif /* DASYNQ_INTERRUPT_HPP_ */
